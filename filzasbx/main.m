@@ -1,4 +1,4 @@
-#import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
@@ -13,64 +13,51 @@ __attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
 static int64_t gconsumehandle = 0;
 
-static void showalert(NSString *message) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        Class appClass = NSClassFromString(@"UIApplication");
-        SEL sharedSel = @selector(sharedApplication);
-        if (!appClass || ![appClass respondsToSelector:sharedSel]) {
-            return;
-        }
+static NSURL *log_file_url(void) {
+    NSArray<NSURL *> *docs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
+                                                                     inDomains:NSUserDomainMask];
+    if (docs.count == 0) {
+        return [NSURL fileURLWithPath:@"/tmp/sbx.log"];
+    }
+    return [docs[0] URLByAppendingPathComponent:@"sbx.log"];
+}
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id app = [appClass performSelector:sharedSel];
-#pragma clang diagnostic pop
-        if (!app) {
-            return;
-        }
+static void log_event(NSString *message) {
+    if (!message) {
+        return;
+    }
 
-        UIWindow *window = nil;
-        SEL keyWindowSel = @selector(keyWindow);
-        if ([app respondsToSelector:keyWindowSel]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            window = [app performSelector:keyWindowSel];
-#pragma clang diagnostic pop
-        }
+    NSURL *logURL = log_file_url();
+    NSDateFormatter *fmt = [NSDateFormatter new];
+    fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss";
 
-        if (!window) {
-            SEL windowsSel = @selector(windows);
-            if ([app respondsToSelector:windowsSel]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                id windowsObj = [app performSelector:windowsSel];
-#pragma clang diagnostic pop
-                if ([windowsObj isKindOfClass:[NSArray class]]) {
-                    NSArray *windows = (NSArray *)windowsObj;
-                    if (windows.count > 0 && [windows.firstObject isKindOfClass:[UIWindow class]]) {
-                        window = (UIWindow *)windows.firstObject;
-                    }
-                }
-            }
-        }
+    NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [fmt stringFromDate:[NSDate date]], message];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) {
+        return;
+    }
 
-        UIViewController *controller = window.rootViewController;
-        if (!controller) {
-            return;
-        }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:logURL.path]) {
+        [data writeToURL:logURL atomically:YES];
+        return;
+    }
 
-        while (controller.presentedViewController) {
-            controller = controller.presentedViewController;
-        }
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+    if (!fh) {
+        [data writeToURL:logURL atomically:YES];
+        return;
+    }
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"filzasbx"
-                                                                       message:message
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:nil]];
-        [controller presentViewController:alert animated:YES completion:nil];
-    });
+    @try {
+        [fh seekToEndOfFile];
+        [fh writeData:data];
+    } @catch (__unused NSException *e) {
+        [data writeToURL:logURL atomically:YES];
+    } @finally {
+        [fh closeFile];
+    }
 }
 
 static int tokenslotpatched(void) {
@@ -94,13 +81,13 @@ static void sanitizetokenslot(void) {
 
 static void consume(void) {
     if (gconsumehandle > 0) {
-        showalert([NSString stringWithFormat:@"token already consumed (handle=%lld)",
-                                           (long long)gconsumehandle]);
+        log_event([NSString stringWithFormat:@"token already consumed (handle=%lld)",
+                   (long long)gconsumehandle]);
         return;
     }
 
     if (!tokenslotpatched()) {
-        showalert(@"token slot not patched");
+        log_event(@"token slot not patched");
         return;
     }
 
@@ -108,44 +95,47 @@ static void consume(void) {
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
-        showalert(@"failed to open libsystem_sandbox");
+        log_event(@"failed to open libsystem_sandbox");
         return;
     }
 
     sandbox_extension_consume_fn consume_fn =
         (sandbox_extension_consume_fn)dlsym(lib, "sandbox_extension_consume");
     if (!consume_fn) {
-        showalert(@"sandbox_extension_consume not found");
+        log_event(@"sandbox_extension_consume not found");
         dlclose(lib);
         return;
     }
 
     int64_t handle = consume_fn(gfilzasbxtokenslot);
     if (handle <= 0) {
-        showalert(@"sandbox token invalid");
+        log_event(@"sandbox token invalid");
         dlclose(lib);
         return;
     }
 
     gconsumehandle = handle;
-    showalert([NSString stringWithFormat:@"sandbox token consumed (handle=%lld)",
-                                       (long long)gconsumehandle]);
+    log_event([NSString stringWithFormat:@"sandbox token consumed (handle=%lld)",
+               (long long)gconsumehandle]);
     dlclose(lib);
 }
 
 __attribute__((constructor))
 static void initializer(void) {
+    log_event(@"initializer started");
     consume();
 }
 
 __attribute__((destructor))
 static void deinitializer(void) {
     if (gconsumehandle <= 0) {
+        log_event(@"deinitializer: no consume handle to release");
         return;
     }
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
+        log_event(@"deinitializer: failed to open libsystem_sandbox");
         return;
     }
 
@@ -153,6 +143,9 @@ static void deinitializer(void) {
         (sandbox_extension_release_fn)dlsym(lib, "sandbox_extension_release");
     if (release_fn) {
         (void)release_fn(gconsumehandle);
+        log_event([NSString stringWithFormat:@"released consume handle=%lld", (long long)gconsumehandle]);
+    } else {
+        log_event(@"deinitializer: sandbox_extension_release not found");
     }
 
     gconsumehandle = 0;
