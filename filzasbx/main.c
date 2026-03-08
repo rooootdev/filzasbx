@@ -19,7 +19,7 @@ __attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
 static int64_t gconsumehandle = 0;
 
-static void append_line(const char *path, const char *line) {
+static void append(const char *path, const char *line) {
     if (!path || !line) {
         return;
     }
@@ -33,7 +33,7 @@ static void append_line(const char *path, const char *line) {
     (void)close(fd);
 }
 
-static void log_event(const char *fmt, ...) {
+static void log(const char *fmt, ...) {
     char msg[2048];
     va_list ap;
     va_start(ap, fmt);
@@ -58,11 +58,11 @@ static void log_event(const char *fmt, ...) {
         char p2[PATH_MAX];
         snprintf(p1, sizeof(p1), "%s/Documents/sbx.log", home);
         snprintf(p2, sizeof(p2), "%s/tmp/sbx.log", home);
-        append_line(p1, line);
-        append_line(p2, line);
+        append(p1, line);
+        append(p2, line);
     }
 
-    append_line("/tmp/sbx.log", line);
+    append("/tmp/sbx.log", line);
 }
 
 static int tokenslotpatched(void) {
@@ -86,12 +86,12 @@ static void sanitizetokenslot(void) {
 
 static void consume(void) {
     if (gconsumehandle > 0) {
-        log_event("token already consumed (handle=%lld)", (long long)gconsumehandle);
+        log("token already consumed (handle=%lld)", (long long)gconsumehandle);
         return;
     }
 
     if (!tokenslotpatched()) {
-        log_event("token slot not patched");
+        log("token slot not patched");
         return;
     }
 
@@ -99,47 +99,47 @@ static void consume(void) {
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
-        log_event("failed to open libsystem_sandbox");
+        log("failed to open libsystem_sandbox");
         return;
     }
 
     sandbox_extension_consume_fn consume_fn =
         (sandbox_extension_consume_fn)dlsym(lib, "sandbox_extension_consume");
     if (!consume_fn) {
-        log_event("sandbox_extension_consume not found");
+        log("sandbox_extension_consume not found");
         dlclose(lib);
         return;
     }
 
     int64_t handle = consume_fn(gfilzasbxtokenslot);
     if (handle <= 0) {
-        log_event("sandbox token invalid");
+        log("sandbox token invalid");
         dlclose(lib);
         return;
     }
 
     gconsumehandle = handle;
-    log_event("sandbox token consumed (handle=%lld)", (long long)gconsumehandle);
+    log("sandbox token consumed (handle=%lld)", (long long)gconsumehandle);
     dlclose(lib);
 }
 
 __attribute__((constructor))
 static void initializer(void) {
     const char *home = getenv("HOME");
-    log_event("initializer started; HOME=%s", home ? home : "(null)");
+    log("initializer started; HOME=%s", home ? home : "(null)");
     consume();
 }
 
 __attribute__((destructor))
 static void deinitializer(void) {
     if (gconsumehandle <= 0) {
-        log_event("deinitializer: no consume handle to release");
+        log("deinitializer: no consume handle to release");
         return;
     }
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
-        log_event("deinitializer: failed to open libsystem_sandbox");
+        log("deinitializer: failed to open libsystem_sandbox");
         return;
     }
 
@@ -147,9 +147,9 @@ static void deinitializer(void) {
         (sandbox_extension_release_fn)dlsym(lib, "sandbox_extension_release");
     if (release_fn) {
         (void)release_fn(gconsumehandle);
-        log_event("released consume handle=%lld", (long long)gconsumehandle);
+        log("released consume handle=%lld", (long long)gconsumehandle);
     } else {
-        log_event("deinitializer: sandbox_extension_release not found");
+        log("deinitializer: sandbox_extension_release not found");
     }
 
     gconsumehandle = 0;
