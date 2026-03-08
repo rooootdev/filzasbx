@@ -1,7 +1,10 @@
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define slotsize 2048
 #define tokenmarker "FILZASBX_TOKEN"
@@ -13,50 +16,59 @@ __attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
 static int64_t gconsumehandle = 0;
 
-static NSURL *log_file_url(void) {
-    NSArray<NSURL *> *docs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
-                                                                     inDomains:NSUserDomainMask];
-    if (docs.count == 0) {
-        return [NSURL fileURLWithPath:@"/tmp/sbx.log"];
-    }
-    return [docs[0] URLByAppendingPathComponent:@"sbx.log"];
-}
-
-static void log_event(NSString *message) {
-    if (!message) {
+static void append_line_to_path(NSString *path, NSString *line) {
+    if (!path || !line) {
         return;
     }
 
-    NSURL *logURL = log_file_url();
+    const char *cpath = [path fileSystemRepresentation];
+    const char *cline = [line UTF8String];
+    if (!cpath || !cline) {
+        return;
+    }
+
+    int fd = open(cpath, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd < 0) {
+        return;
+    }
+
+    (void)write(fd, cline, strlen(cline));
+    (void)close(fd);
+}
+
+static NSArray<NSString *> *candidate_log_paths(void) {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+
+    NSString *home = NSHomeDirectory();
+    if (home.length > 0) {
+        [paths addObject:[home stringByAppendingPathComponent:@"Documents/sbx.log"]];
+        [paths addObject:[home stringByAppendingPathComponent:@"tmp/sbx.log"]];
+    }
+
+    NSArray<NSURL *> *docs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
+                                                                     inDomains:NSUserDomainMask];
+    if (docs.count > 0) {
+        NSString *docPath = [[docs[0] URLByAppendingPathComponent:@"sbx.log"] path];
+        if (docPath.length > 0 && ![paths containsObject:docPath]) {
+            [paths addObject:docPath];
+        }
+    }
+
+    [paths addObject:@"/tmp/sbx.log"];
+    return paths;
+}
+
+static NSString *timestamp_line(NSString *message) {
     NSDateFormatter *fmt = [NSDateFormatter new];
     fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    return [NSString stringWithFormat:@"[%@] %@\n", [fmt stringFromDate:[NSDate date]], message ?: @"(null)"];
+}
 
-    NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [fmt stringFromDate:[NSDate date]], message];
-    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data) {
-        return;
-    }
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:logURL.path]) {
-        [data writeToURL:logURL atomically:YES];
-        return;
-    }
-
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
-    if (!fh) {
-        [data writeToURL:logURL atomically:YES];
-        return;
-    }
-
-    @try {
-        [fh seekToEndOfFile];
-        [fh writeData:data];
-    } @catch (__unused NSException *e) {
-        [data writeToURL:logURL atomically:YES];
-    } @finally {
-        [fh closeFile];
+static void log_event(NSString *message) {
+    NSString *line = timestamp_line(message);
+    for (NSString *path in candidate_log_paths()) {
+        append_line_to_path(path, line);
     }
 }
 
@@ -122,7 +134,15 @@ static void consume(void) {
 
 __attribute__((constructor))
 static void initializer(void) {
-    log_event(@"initializer started");
+    NSString *home = NSHomeDirectory() ?: @"(nil)";
+    log_event([NSString stringWithFormat:@"initializer started; HOME=%@", home]);
+
+    NSMutableString *pathDump = [NSMutableString stringWithString:@"log candidates:"];
+    for (NSString *path in candidate_log_paths()) {
+        [pathDump appendFormat:@" %@;", path];
+    }
+    log_event(pathDump);
+
     consume();
 }
 
