@@ -2,7 +2,7 @@
 
 Minimal injected payload for Filza:
 
-- Exposes a fixed token slot in the dylib: `gFilzaSbxTokenSlot` (`2048` bytes)
+- Exposes a fixed token slot in the dylib: `gfilzasbxtokenslot` (`2048` bytes)
 - On dylib load (`constructor`), calls `sandbox_extension_consume(token)`
 - Keeps the consume handle alive for process lifetime
 - Releases handle on unload (`destructor`)
@@ -11,7 +11,7 @@ Minimal injected payload for Filza:
 
 The slot is initialized with:
 
-`FILZASBX_TOKEN_SLOT_V1`
+`FILZASBX_TOKEN`
 
 Before injection, patch that marker bytes in the dylib with a NUL-terminated sandbox extension token.
 

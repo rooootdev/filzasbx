@@ -17,7 +17,7 @@ static int tokenslotpatched(void) {
     if (gfilzasbxtokenslot[0] == '\0') {
         return 0;
     }
-    return strcmp(gfilzasbxtokenslot, FILZASBX_TOKEN_MARKER) != 0;
+    return strcmp(gfilzasbxtokenslot, tokenmarker) != 0;
 }
 
 static void sanitizetokenslot(void) {
