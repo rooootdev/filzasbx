@@ -15,7 +15,7 @@ static int64_t gconsumehandle = 0;
 
 static void showalert(NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIApplication *app = UIApplication.sharedApplication;
+        UIApplication *app = [UIApplication sharedApplication];
         if (!app) {
             return;
         }
