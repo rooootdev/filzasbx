@@ -3,66 +3,82 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FILZA2K_TOKEN_SLOT_SIZE 2048
-#define FILZA2K_TOKEN_MARKER "SL2K_TOKEN_SLOT_V1"
+#define slotsize 2048
+#define tokenmarker "FILZASBX_TOKEN"
 
 typedef int64_t (*sandbox_extension_consume_fn)(const char *token);
 typedef int32_t (*sandbox_extension_release_fn)(int64_t handle);
 
-// This slot is patched by symlin2k before injection.
-// Keep it writable and with a fixed size so the offset remains stable.
-__attribute__((used)) char gFilza2KTokenSlot[FILZA2K_TOKEN_SLOT_SIZE] = FILZA2K_TOKEN_MARKER;
+__attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
-static int64_t gConsumeHandle = 0;
+static int64_t gconsumehandle = 0;
 
-static int token_slot_is_patched(void) {
-    if (gFilza2KTokenSlot[0] == '\0') {
+static int tokenslotpatched(void) {
+    if (gfilzasbxtokenslot[0] == '\0') {
         return 0;
     }
-    return strcmp(gFilza2KTokenSlot, FILZA2K_TOKEN_MARKER) != 0;
+    return strcmp(gfilzasbxtokenslot, FILZASBX_TOKEN_MARKER) != 0;
 }
 
-static void filza2k_consume_token_if_valid(void) {
-    if (!token_slot_is_patched()) {
-        fprintf(stderr, "[filza2k] token slot not patched\n");
+static void sanitizetokenslot(void) {
+    size_t n = strnlen(gfilzasbxtokenslot, slotsize);
+    if (n == 0 || n >= slotsize) {
         return;
     }
 
+    while (n > 0 && (gfilzasbxtokenslot[n - 1] == '\n' || gfilzasbxtokenslot[n - 1] == '\r')) {
+        gfilzasbxtokenslot[n - 1] = '\0';
+        n--;
+    }
+}
+
+static void consume(void) {
+    if (gconsumehandle > 0) {
+        fprintf(stderr, "[filzasbx] token already consumed (handle=%lld)\n", (long long)gconsumehandle);
+        return;
+    }
+
+    if (!tokenslotpatched()) {
+        fprintf(stderr, "[filzasbx] token slot not patched\n");
+        return;
+    }
+
+    sanitizetokenslot();
+
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
-        fprintf(stderr, "[filza2k] failed to open libsystem_sandbox\n");
+        fprintf(stderr, "[filzasbx] failed to open libsystem_sandbox\n");
         return;
     }
 
     sandbox_extension_consume_fn consume_fn =
         (sandbox_extension_consume_fn)dlsym(lib, "sandbox_extension_consume");
     if (!consume_fn) {
-        fprintf(stderr, "[filza2k] sandbox_extension_consume not found\n");
+        fprintf(stderr, "[filzasbx] sandbox_extension_consume not found\n");
         dlclose(lib);
         return;
     }
 
-    int64_t handle = consume_fn(gFilza2KTokenSlot);
+    int64_t handle = consume_fn(gfilzasbxtokenslot);
     if (handle <= 0) {
-        fprintf(stderr, "[filza2k] sandbox token invalid\n");
+        fprintf(stderr, "[filzasbx] sandbox token invalid\n");
         dlclose(lib);
         return;
     }
 
-    gConsumeHandle = handle;
-    fprintf(stderr, "[filza2k] sandbox token valid and consumed\n");
+    gconsumehandle = handle;
+    fprintf(stderr, "[filzasbx] sandbox token consumed (handle=%lld)\n", (long long)gconsumehandle);
     dlclose(lib);
 }
 
 __attribute__((constructor))
-static void filza2k_initializer(void) {
-    // Run on every load to verify and consume the patched token.
-    filza2k_consume_token_if_valid();
+static void initializer(void) {
+    consume();
 }
 
 __attribute__((destructor))
-static void filza2k_deinitializer(void) {
-    if (gConsumeHandle <= 0) {
+static void deinitializer(void) {
+    if (gconsumehandle <= 0) {
         return;
     }
 
@@ -74,9 +90,9 @@ static void filza2k_deinitializer(void) {
     sandbox_extension_release_fn release_fn =
         (sandbox_extension_release_fn)dlsym(lib, "sandbox_extension_release");
     if (release_fn) {
-        (void)release_fn(gConsumeHandle);
+        (void)release_fn(gconsumehandle);
     }
 
-    gConsumeHandle = 0;
+    gconsumehandle = 0;
     dlclose(lib);
 }
