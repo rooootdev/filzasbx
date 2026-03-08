@@ -15,23 +15,44 @@ static int64_t gconsumehandle = 0;
 
 static void showalert(NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIApplication *app = [UIApplication sharedApplication];
+        Class appClass = NSClassFromString(@"UIApplication");
+        SEL sharedSel = @selector(sharedApplication);
+        if (!appClass || ![appClass respondsToSelector:sharedSel]) {
+            return;
+        }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id app = [appClass performSelector:sharedSel];
+#pragma clang diagnostic pop
         if (!app) {
             return;
         }
 
         UIWindow *window = nil;
-
+        SEL keyWindowSel = @selector(keyWindow);
+        if ([app respondsToSelector:keyWindowSel]) {
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        window = app.keyWindow;
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            window = [app performSelector:keyWindowSel];
+#pragma clang diagnostic pop
+        }
+
         if (!window) {
-            NSArray<UIWindow *> *windows = app.windows;
-            if (windows.count > 0) {
-                window = windows.firstObject;
+            SEL windowsSel = @selector(windows);
+            if ([app respondsToSelector:windowsSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                id windowsObj = [app performSelector:windowsSel];
+#pragma clang diagnostic pop
+                if ([windowsObj isKindOfClass:[NSArray class]]) {
+                    NSArray *windows = (NSArray *)windowsObj;
+                    if (windows.count > 0 && [windows.firstObject isKindOfClass:[UIWindow class]]) {
+                        window = (UIWindow *)windows.firstObject;
+                    }
+                }
             }
         }
-#pragma clang diagnostic pop
 
         UIViewController *controller = window.rootViewController;
         if (!controller) {
