@@ -1,4 +1,4 @@
-name: Build And Release
+name: build
 
 on:
   push:
@@ -10,24 +10,24 @@ permissions:
   contents: write
 
 concurrency:
-  group: filzasbx-latest-release
+  group: latest
   cancel-in-progress: true
 
 jobs:
-  build-and-release:
+  build:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout
+      - name: checkout
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: build
         run: make
 
-      - name: Create SHA256
+      - name: create SHA256
         run: shasum -a 256 build/filzasbx.dylib > build/filzasbx.dylib.sha256
 
-      - name: Publish latest release
+      - name: publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
