@@ -1,7 +1,13 @@
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #define slotsize 2048
 #define tokenmarker "FILZASBX_TOKEN"
@@ -12,6 +18,52 @@ typedef int32_t (*sandbox_extension_release_fn)(int64_t handle);
 __attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
 static int64_t gconsumehandle = 0;
+
+static void append_line(const char *path, const char *line) {
+    if (!path || !line) {
+        return;
+    }
+
+    int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd < 0) {
+        return;
+    }
+
+    (void)write(fd, line, strlen(line));
+    (void)close(fd);
+}
+
+static void log_event(const char *fmt, ...) {
+    char msg[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    char ts[64] = {0};
+    time_t now = time(NULL);
+    struct tm local_tm = {0};
+    if (localtime_r(&now, &local_tm)) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &local_tm);
+    } else {
+        snprintf(ts, sizeof(ts), "time-unknown");
+    }
+
+    char line[2300];
+    snprintf(line, sizeof(line), "[%s] %s\n", ts, msg);
+
+    const char *home = getenv("HOME");
+    if (home && home[0] != '\0') {
+        char p1[PATH_MAX];
+        char p2[PATH_MAX];
+        snprintf(p1, sizeof(p1), "%s/Documents/sbx.log", home);
+        snprintf(p2, sizeof(p2), "%s/tmp/sbx.log", home);
+        append_line(p1, line);
+        append_line(p2, line);
+    }
+
+    append_line("/tmp/sbx.log", line);
+}
 
 static int tokenslotpatched(void) {
     if (gfilzasbxtokenslot[0] == '\0') {
@@ -34,12 +86,12 @@ static void sanitizetokenslot(void) {
 
 static void consume(void) {
     if (gconsumehandle > 0) {
-        fprintf(stderr, "[filzasbx] token already consumed (handle=%lld)\n", (long long)gconsumehandle);
+        log_event("token already consumed (handle=%lld)", (long long)gconsumehandle);
         return;
     }
 
     if (!tokenslotpatched()) {
-        fprintf(stderr, "[filzasbx] token slot not patched\n");
+        log_event("token slot not patched");
         return;
     }
 
@@ -47,43 +99,47 @@ static void consume(void) {
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
-        fprintf(stderr, "[filzasbx] failed to open libsystem_sandbox\n");
+        log_event("failed to open libsystem_sandbox");
         return;
     }
 
     sandbox_extension_consume_fn consume_fn =
         (sandbox_extension_consume_fn)dlsym(lib, "sandbox_extension_consume");
     if (!consume_fn) {
-        fprintf(stderr, "[filzasbx] sandbox_extension_consume not found\n");
+        log_event("sandbox_extension_consume not found");
         dlclose(lib);
         return;
     }
 
     int64_t handle = consume_fn(gfilzasbxtokenslot);
     if (handle <= 0) {
-        fprintf(stderr, "[filzasbx] sandbox token invalid\n");
+        log_event("sandbox token invalid");
         dlclose(lib);
         return;
     }
 
     gconsumehandle = handle;
-    fprintf(stderr, "[filzasbx] sandbox token consumed (handle=%lld)\n", (long long)gconsumehandle);
+    log_event("sandbox token consumed (handle=%lld)", (long long)gconsumehandle);
     dlclose(lib);
 }
 
 __attribute__((constructor))
 static void initializer(void) {
+    const char *home = getenv("HOME");
+    log_event("initializer started; HOME=%s", home ? home : "(null)");
     consume();
 }
 
 __attribute__((destructor))
 static void deinitializer(void) {
     if (gconsumehandle <= 0) {
+        log_event("deinitializer: no consume handle to release");
         return;
     }
 
     void *lib = dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW);
     if (!lib) {
+        log_event("deinitializer: failed to open libsystem_sandbox");
         return;
     }
 
@@ -91,6 +147,9 @@ static void deinitializer(void) {
         (sandbox_extension_release_fn)dlsym(lib, "sandbox_extension_release");
     if (release_fn) {
         (void)release_fn(gconsumehandle);
+        log_event("released consume handle=%lld", (long long)gconsumehandle);
+    } else {
+        log_event("deinitializer: sandbox_extension_release not found");
     }
 
     gconsumehandle = 0;

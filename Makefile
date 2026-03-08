@@ -1,9 +1,9 @@
 SDKROOT ?= $(shell xcrun --sdk iphoneos --show-sdk-path)
 CC ?= $(shell xcrun --sdk iphoneos -f clang)
 CFLAGS ?= -isysroot $(SDKROOT) -arch arm64 -fPIC -O2 -Wall -Wextra
-LDFLAGS ?= -dynamiclib -framework Foundation -framework UIKit
+LDFLAGS ?= -dynamiclib
 
-SRC := filzasbx/main.m
+SRC := filzasbx/main.c
 OUT := build/filzasbx.dylib
 
 all: $(OUT)
