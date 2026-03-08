@@ -1,4 +1,6 @@
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
 #include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
@@ -13,51 +15,50 @@ __attribute__((used)) char gfilzasbxtokenslot[slotsize] = tokenmarker;
 
 static int64_t gconsumehandle = 0;
 
+static id msg_send_id(id obj, SEL sel) {
+    return ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+}
+
 static void showalert(NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIApplication *app = [UIApplication sharedApplication];
+        Class appClass = objc_getClass("UIApplication");
+        SEL sharedSel = sel_registerName("sharedApplication");
+        if (!appClass || !class_respondsToSelector(object_getClass(appClass), sharedSel)) {
+            return;
+        }
+
+        id app = msg_send_id((id)appClass, sharedSel);
         if (!app) {
             return;
         }
 
         UIWindow *window = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene *scene in app.connectedScenes) {
-                if (![scene isKindOfClass:[UIWindowScene class]]) {
-                    continue;
-                }
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                if (windowScene.activationState != UISceneActivationStateForegroundActive) {
-                    continue;
-                }
-                for (UIWindow *candidate in windowScene.windows) {
-                    if (candidate.isKeyWindow) {
-                        window = candidate;
-                        break;
-                    }
-                }
-                if (!window) {
-                    window = windowScene.windows.firstObject;
-                }
-                if (window) {
-                    break;
+        SEL keyWindowSel = sel_registerName("keyWindow");
+        if ([app respondsToSelector:keyWindowSel]) {
+            window = (UIWindow *)msg_send_id(app, keyWindowSel);
+        }
+
+        if (!window) {
+            SEL windowsSel = sel_registerName("windows");
+            if ([app respondsToSelector:windowsSel]) {
+                NSArray *windows = (NSArray *)msg_send_id(app, windowsSel);
+                if ([windows isKindOfClass:[NSArray class]] && windows.count > 0) {
+                    window = (UIWindow *)windows.firstObject;
                 }
             }
         }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        if (!window) {
-            window = app.keyWindow ?: app.windows.firstObject;
+        if (!window || ![window respondsToSelector:@selector(rootViewController)]) {
+            return;
         }
-#pragma clang diagnostic pop
 
         UIViewController *controller = window.rootViewController;
         if (!controller) {
             return;
         }
 
-        while (controller.presentedViewController) {
+        while ([controller respondsToSelector:@selector(presentedViewController)] &&
+               controller.presentedViewController) {
             controller = controller.presentedViewController;
         }
 
@@ -67,7 +68,10 @@ static void showalert(NSString *message) {
         [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                                   style:UIAlertActionStyleDefault
                                                 handler:nil]];
-        [controller presentViewController:alert animated:YES completion:nil];
+
+        if ([controller respondsToSelector:@selector(presentViewController:animated:completion:)]) {
+            [controller presentViewController:alert animated:YES completion:nil];
+        }
     });
 }
 
