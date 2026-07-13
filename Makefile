@@ -3,7 +3,7 @@ CC ?= $(shell xcrun --sdk iphoneos -f clang)
 CFLAGS ?= -isysroot $(SDKROOT) -arch arm64 -fPIC -O2 -Wall -Wextra
 LDFLAGS ?= -dynamiclib
 
-SRC := filzasbx/main.c
+SRC := filzasbx/main.m
 OUT := build/filzasbx.dylib
 
 all: $(OUT)
