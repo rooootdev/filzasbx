@@ -64,7 +64,7 @@ static void show_alert(void) {
                     [[NSUserDefaults standardUserDefaults]
                         setObject:token forKey:@"SandboxToken"];
                 } else {
-                    showTokenAlert();
+                    show_alert();
                 }
             }]
         ];
