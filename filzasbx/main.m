@@ -52,15 +52,20 @@ static void show_alert(void) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"filzasbx" message:@"Enter sandbox token" preferredStyle:UIAlertControllerStyleAlert];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *field) { field.placeholder = @"Token"; }];
 
-        [alert addAction: UIAlertAction actionWithTitle:@"Submit" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            NSString *token = alert.textFields.firstObject.text;
+        [alert addAction:
+            [UIAlertAction actionWithTitle:@"Submit"
+                                     style:UIAlertActionStyleDefault
+                                   handler:^(UIAlertAction *action) {
+                NSString *token = alert.textFields.firstObject.text;
 
-            if (token.length && consume_token(token.UTF8String)) {
-                [[NSUserDefaults standardUserDefaults] setObject:token forKey:@"sbx_token"];
-            } else {
-                show_alert();
-            }
-        }]];
+                if (token.length && consume_token(token.UTF8String)) {
+                    [[NSUserDefaults standardUserDefaults]
+                        setObject:token forKey:@"SandboxToken"];
+                } else {
+                    showTokenAlert();
+                }
+            }]
+        ];
 
         UIViewController *vc = UIApplication.sharedApplication.keyWindow.rootViewController;
 
