@@ -62,26 +62,54 @@ static void show_alert(void) {
 
                 if (token.length && consume_token(token.UTF8String)) {
                     [[NSUserDefaults standardUserDefaults]
-                        setObject:token forKey:@"SandboxToken"];
+                        setObject:token forKey:@"sbx_token"];
                 } else {
                     show_alert();
                 }
             }]
         ];
 
-        UIViewController *vc = UIApplication.sharedApplication.keyWindow.rootViewController;
+        UIWindow *window = UIApplication.sharedApplication.windows.firstObject;
+        UIViewController *vc = window.rootViewController;
 
-        if (vc) [vc presentViewController:alert animated:YES completion:nil];
-        else show_alert();
+        while (vc.presentedViewController) {
+            vc = vc.presentedViewController;
+        }
+
+        if (vc) {
+            [vc presentViewController:alert animated:YES completion:nil];
+        } else {
+            show_alert();
+        }
     });
 }
 
 __attribute__((constructor))
 static void initializer(void) {
-    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"sbx_token"];
-    if (!saved || !consume_token(saved.UTF8String)) show_alert();
-}
+    dispatch_async(dispatch_get_main_queue(), ^{
+        void (^checkToken)(void) = ^{
+            NSString *saved =
+                [[NSUserDefaults standardUserDefaults] stringForKey:@"sbx_token"];
 
+            if (!saved || !consume_token(saved.UTF8String)) {
+                show_alert();
+            }
+        };
+
+        if (UIApplication.sharedApplication.applicationState ==
+            UIApplicationStateActive) {
+            checkToken();
+        } else {
+            [[NSNotificationCenter defaultCenter]
+                addObserverForName:UIApplicationDidBecomeActiveNotification
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *note) {
+                checkToken();
+            }];
+        }
+    });
+}
 
 __attribute__((destructor))
 static void deinitializer(void) {
