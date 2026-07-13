@@ -47,6 +47,8 @@ void release_token(void) {
     dlclose(lib);
 }
 
+static void show_alert(void);
+
 static void show_alert(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"filzasbx" message:@"Enter sandbox token" preferredStyle:UIAlertControllerStyleAlert];
